@@ -40,8 +40,11 @@ pub struct PageSpec {
     pub title: String,
     #[serde(rename = "type")]
     pub page_type: String,
+    #[serde(default)]
     pub source_sections: Vec<String>,
+    #[serde(default)]
     pub source_pages: Vec<u32>,
+    #[serde(default)]
     pub source_content: String,
     #[serde(default)]
     pub assets: PageSpecAssets,
@@ -62,6 +65,57 @@ pub struct PageSpecAssets {
     pub tables: Vec<String>,
     #[serde(default)]
     pub equations: Vec<String>,
+}
+
+/// Fill source excerpts that a structured-output model omitted from its plan.
+/// Page and section references remain the authority; the fallback only uses the
+/// beginning of the paper when the model supplied neither.
+pub(crate) fn enrich_learning_plan_sources(plan: &mut LearningPlan, paper: &PaperDocument) {
+    const MAX_SOURCE_CHARS: usize = 12_000;
+
+    for spec in &mut plan.pages {
+        if !spec.source_content.trim().is_empty() {
+            continue;
+        }
+
+        let mut excerpts = Vec::new();
+        for section_ref in &spec.source_sections {
+            if let Some(section) = paper.sections.iter().find(|section| {
+                section.id.eq_ignore_ascii_case(section_ref)
+                    || section.title.eq_ignore_ascii_case(section_ref)
+            }) {
+                push_unique_excerpt(&mut excerpts, &section.text);
+            }
+        }
+        for page_number in &spec.source_pages {
+            if let Some(page) = paper
+                .pages
+                .iter()
+                .find(|page| page.page_number == *page_number)
+            {
+                push_unique_excerpt(&mut excerpts, &page.text);
+            }
+        }
+
+        if excerpts.is_empty() {
+            for page in paper.pages.iter().take(2) {
+                push_unique_excerpt(&mut excerpts, &page.text);
+            }
+        }
+
+        spec.source_content = excerpts
+            .join("\n\n")
+            .chars()
+            .take(MAX_SOURCE_CHARS)
+            .collect();
+    }
+}
+
+fn push_unique_excerpt(excerpts: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if !value.is_empty() && !excerpts.iter().any(|existing| existing == value) {
+        excerpts.push(value.to_string());
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +279,47 @@ pub enum RuntimeError {
 /// Ensure we always carry the paper json type (used by the trait).
 #[allow(dead_code)]
 fn _assert_paper_json(_p: &PaperJson) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ingest::structure::{PageText, Section};
+
+    #[test]
+    fn fills_omitted_plan_content_from_referenced_sources() {
+        let mut plan: LearningPlan = serde_json::from_value(serde_json::json!({
+            "summary": "A plan",
+            "pages": [{
+                "title": "Method",
+                "type": "concept",
+                "source_sections": ["s2"],
+                "source_pages": [4]
+            }]
+        }))
+        .unwrap();
+        let paper = PaperDocument {
+            sections: vec![Section {
+                id: "s2".into(),
+                title: "Method".into(),
+                level: 1,
+                page_number: 4,
+                text: "Section evidence.".into(),
+            }],
+            pages: vec![PageText {
+                page_number: 4,
+                text: "Page evidence.".into(),
+            }],
+            ..Default::default()
+        };
+
+        enrich_learning_plan_sources(&mut plan, &paper);
+
+        assert_eq!(
+            plan.pages[0].source_content,
+            "Section evidence.\n\nPage evidence."
+        );
+    }
+}
 
 // ── Experiment runtime payloads ────────────────────────────────────
 //

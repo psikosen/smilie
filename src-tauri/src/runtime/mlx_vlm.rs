@@ -284,7 +284,10 @@ impl ModelRuntime for MlxVlmSidecar {
         let v = self
             .rpc("reason", serde_json::to_value(&paper).unwrap())
             .await?;
-        serde_json::from_value(v).map_err(|e| RuntimeError::Inference(e.to_string()))
+        let mut plan: LearningPlan =
+            serde_json::from_value(v).map_err(|e| RuntimeError::Inference(e.to_string()))?;
+        enrich_learning_plan_sources(&mut plan, &paper);
+        Ok(plan)
     }
 
     async fn generate(&self, spec: PageSpec) -> Result<GeneratedPage, RuntimeError> {

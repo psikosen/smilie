@@ -105,7 +105,9 @@ impl ModelRuntime for OllamaRuntime {
     }
 
     async fn reason(&self, paper: PaperDocument) -> Result<LearningPlan, RuntimeError> {
-        parse_plan(&self.complete(&build_reason_prompt(&paper)).await?)
+        let mut plan = parse_plan(&self.complete(&build_reason_prompt(&paper)).await?)?;
+        enrich_learning_plan_sources(&mut plan, &paper);
+        Ok(plan)
     }
 
     async fn generate(&self, spec: PageSpec) -> Result<GeneratedPage, RuntimeError> {

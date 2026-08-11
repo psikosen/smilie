@@ -110,7 +110,9 @@ impl ModelRuntime for LlamaCppLocal {
     async fn reason(&self, paper: PaperDocument) -> Result<LearningPlan, RuntimeError> {
         let prompt = build_reason_prompt(&paper);
         let raw = self.complete(&prompt, 4096).await?;
-        parse_plan(&raw)
+        let mut plan = parse_plan(&raw)?;
+        enrich_learning_plan_sources(&mut plan, &paper);
+        Ok(plan)
     }
 
     async fn generate(&self, spec: PageSpec) -> Result<GeneratedPage, RuntimeError> {
