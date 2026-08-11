@@ -1,0 +1,160 @@
+/*
+ * Night-Tokyo design tokens.
+ * Black base, purple metallic shine, dynamic lighting.
+ */
+
+:root {
+  /* ── Surfaces ──────────────────────────────────────────── */
+  --bg-void: #030308;
+  --bg-panel: #090812;
+  --bg-elevated: #11101c;
+  --bg-glass: rgba(9, 8, 18, 0.72);
+  --bg-overlay: rgba(3, 3, 8, 0.78);
+
+  /* ── Purple metallic ramp ──────────────────────────────── */
+  --violet-50: #efe5ff;
+  --violet-100: #c8a8ff;
+  --violet-200: #b28bff;
+  --violet-300: #9a6bff;
+  --violet-400: #8247ff;
+  --violet-500: #6a2dff; /* primary */
+  --violet-600: #5018dd;
+  --violet-700: #3d1199;
+  --violet-800: #270a66;
+  --violet-glow: #b580ff;
+
+  /* ── Tokyo neon accents ────────────────────────────────── */
+  --cyan-accent: #4ff0ff;
+  --cyan-glow: #7df9ff;
+  --magenta: #ff3ea5;
+  --magenta-glow: #ff6fbd;
+
+  /* ── Semantic ──────────────────────────────────────────── */
+  --status-ok: #5dffa0;
+  --status-warn: #ffcb5d;
+  --status-err: #ff6b7b;
+
+  /* ── Text ──────────────────────────────────────────────── */
+  --text-hi: #f3ecff;
+  --text-mid: #a498c4;
+  --text-dim: #6b5f87;
+  --text-ghost: #4a4163;
+
+  /* ── Lines + depth ─────────────────────────────────────── */
+  --border: rgba(178, 139, 255, 0.18);
+  --border-strong: rgba(200, 168, 255, 0.42);
+  --border-subtle: rgba(178, 139, 255, 0.09);
+  --divider: rgba(255, 255, 255, 0.055);
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px -6px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 20px 60px -20px rgba(0, 0, 0, 0.7);
+  --shadow-deep: 0 28px 90px -24px rgba(106, 45, 255, 0.52);
+  --shadow-glow: 0 0 24px -4px var(--violet-glow);
+  --shadow-cyan: 0 0 18px -2px rgba(79, 240, 255, 0.4);
+
+  /* ── Radii ─────────────────────────────────────────────── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-pill: 999px;
+
+  /* ── Motion ────────────────────────────────────────────── */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 320ms;
+  --dur-shimmer: 6s;
+  --ease: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── Typography ────────────────────────────────────────── */
+  --font-sans: "Geist", "Inter", system-ui, -apple-system, "SF Pro Text",
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace,
+    monospace;
+
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --text-3xl: 44px;
+
+  /* ── Cursor-follow glow (set by effects.ts) ───────────── */
+  --mx: 50%;
+  --my: 50%;
+  --mx-strength: 0;
+
+  /* ── Z-index scale ─────────────────────────────────────── */
+  --z-base: 0;
+  --z-sticky: 40;
+  --z-drawer: 60;
+  --z-overlay: 80;
+  --z-toast: 100;
+}
+
+/* ── Reusable effect mixins via classes ─────────────────── */
+
+.surface-metallic {
+  background:
+    radial-gradient(
+      1200px circle at calc(var(--mx) * 1%) calc(var(--my) * 1%),
+      rgba(154, 107, 255, calc(var(--mx-strength) * 0.18)),
+      transparent 40%
+    ),
+    linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0.08) 0%,
+      rgba(255, 255, 255, 0.012) 18%,
+      rgba(79, 240, 255, 0.055) 36%,
+      transparent 54%
+    ),
+    linear-gradient(
+      135deg,
+      var(--bg-panel) 0%,
+      #191228 45%,
+      var(--bg-panel) 100%
+    );
+  border: 1px solid var(--border);
+}
+
+.surface-glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--border);
+}
+
+.edge-lit {
+  border: 1px solid var(--border-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    var(--shadow-glow);
+}
+
+.scanline-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/></svg>");
+  mix-blend-mode: overlay;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
+  .shimmer-sweep::after,
+  .cursor-glow {
+    animation: none !important;
+  }
+}

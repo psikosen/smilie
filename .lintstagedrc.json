@@ -1,0 +1,9 @@
+{
+  "*.{ts,js}": ["eslint --max-warnings 0 --no-warn-ignored"],
+  "*.svelte": [
+    "svelte-check --tsconfig ./tsconfig.json"
+  ],
+  "src-tauri/**/*.rs": [
+    "bash -c 'cd src-tauri && cargo fmt --check'"
+  ]
+}

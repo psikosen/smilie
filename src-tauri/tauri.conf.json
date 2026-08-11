@@ -1,0 +1,65 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Smilie",
+  "version": "0.1.0",
+  "identifier": "com.smilie.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Smilie",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 920,
+        "minHeight": 600,
+        "dragDropEnabled": true,
+        "decorations": true,
+        "transparent": false,
+        "backgroundColor": "#07060b"
+      }
+    ],
+    "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/**",
+          "$APPLOCALDATA/**",
+          "$RESOURCE/**"
+        ]
+      },
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: file: blob:; style-src-elem 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; frame-src 'self' asset: http://asset.localhost file: blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "copyright": "",
+    "category": "Education",
+    "shortDescription": "Scientific paper → interactive learning pages",
+    "longDescription": "Upload scientific papers and Smilie generates persistent interactive learning pages.",
+    "resources": [
+      "assets/experiment-runner.html",
+      "assets/experiment-worker.js",
+      "assets/pyodide/**/*"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "mobile": [
+        { "format": "multi", "scheme": "smilie" }
+      ]
+    }
+  }
+}

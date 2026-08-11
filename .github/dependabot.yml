@@ -1,0 +1,33 @@
+# Dependabot config for Smilie.
+#
+# Three update streams: the Rust crate in src-tauri/, the SvelteKit frontend
+# at the repo root, and the GitHub Actions workflows themselves. All three
+# run weekly. Dev dependencies are grouped into a single PR per ecosystem
+# to keep noise down — runtime dependencies still come through individually
+# so they get explicit review.
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/src-tauri"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev:
+        dependency-type: development
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

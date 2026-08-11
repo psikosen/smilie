@@ -1,0 +1,104 @@
+# Release workflow for Smilie.
+#
+# How to cut a release:
+#   1. Bump version numbers in package.json + src-tauri/tauri.conf.json + src-tauri/Cargo.toml.
+#   2. Commit those bumps.
+#   3. Tag and push:
+#        git tag v0.1.0
+#        git push origin v0.1.0
+#
+# This workflow is triggered by the tag push (any tag matching `v*`). It runs a
+# matrix build over macOS, Windows, and Ubuntu, packages the Tauri app on each,
+# and creates a *draft* GitHub release with the platform installers attached:
+#   - macOS:   .dmg
+#   - Windows: .msi
+#   - Linux:   .deb and .AppImage
+#
+# The release is left as a draft so a human can review the artifacts and
+# publish it manually (or edit the release notes) before it goes public.
+#
+# macOS code signing is intentionally NOT configured here. The .dmg will be
+# unsigned, which means Gatekeeper will warn end users on first launch
+# ("unidentified developer"). To enable signing later you'll need an Apple
+# Developer ID certificate plus the APPLE_* secrets documented in the
+# tauri-action README; until then we ship unsigned artifacts.
+#
+# Updater JSON generation is also disabled (`includeUpdaterJson: false`)
+# because we don't yet have an updater endpoint.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Required so tauri-action can create the GitHub release and upload artifacts.
+permissions:
+  contents: write
+
+jobs:
+  build-tauri:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            pkg-config
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: SvelteKit static build
+        run: npm run build
+
+      - name: Build & publish Tauri app
+        # Pinned to v0.5 for reproducibility. tauri-action handles the
+        # `cargo tauri build` invocation, picks up the platform-specific
+        # bundle outputs, creates / updates the GitHub release, and uploads
+        # all artifacts. No macOS signing secrets configured (see top-of-file
+        # comment).
+        uses: tauri-apps/tauri-action@v0.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Smilie ${{ github.ref_name }}"
+          releaseBody: "See CHANGELOG for details."
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: false

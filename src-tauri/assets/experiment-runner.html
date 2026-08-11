@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Smilie Experiment Runner
+      ────────────────────────
+      Headless Pyodide host. Loaded inside a sandboxed iframe by the
+      ExperimentRunner Svelte component. The iframe has NO direct policy:
+      it only relays postMessage between the parent window and the inner
+      Web Worker (which actually drives Pyodide).
+
+      Files are served by Tauri's asset protocol from src-tauri/assets/.
+      pyodide/ is vendored on the host via scripts/install_pyodide.sh.
+
+      CSP reasoning:
+        - default-src 'self'                ── no third-party fetches
+        - script-src  'self' 'wasm-unsafe-eval'
+            ('wasm-unsafe-eval' lets WebAssembly.compile() run; it
+             replaces the older blanket 'unsafe-eval' for WASM only)
+        - worker-src  'self' blob:          ── pyodide.js spawns a
+            blob: URL worker for some internal operations
+        - connect-src 'self'                ── XHR/fetch only against
+            the asset protocol (for the .wasm + .data files)
+
+      No 'unsafe-inline' for scripts. The single inline <script> below
+      is intentional — keep it tiny + auditable. If it grows past ~80
+      lines, split it into a separate file and tighten the CSP.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    />
+    <title>Smilie experiment runner</title>
+    <style>
+      :root {
+        --bg: #07060b;
+        --panel: #0e0b18;
+        --violet: #9a6bff;
+        --violet-glow: #b580ff;
+        --text: #f3ecff;
+        --text-mid: #a498c4;
+        --border: rgba(154, 107, 255, 0.18);
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.5 "Geist", "Inter", system-ui, -apple-system, sans-serif;
+        height: 100%;
+        overflow: hidden;
+      }
+      /*
+        The runner has no visible UI by default — the parent renders the
+        outputs. We expose a single progress bar that's only visible
+        while Pyodide is downloading + initializing (~10MB, 5-15s on
+        first open). Once `ready` fires, the overlay fades out.
+      */
+      #progress {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 24px;
+        text-align: center;
+        background: var(--bg);
+        transition: opacity 200ms ease;
+      }
+      #progress.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #progress .label {
+        color: var(--text-mid);
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      #progress .bar {
+        width: min(280px, 80vw);
+        height: 4px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      #progress .fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--violet), var(--violet-glow));
+        box-shadow: 0 0 12px -2px var(--violet-glow);
+        transition: width 120ms linear;
+      }
+      #progress .pct {
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        font-size: 11px;
+      }
+      /*
+        Debug log overlay. Hidden by default. The parent can flip it
+        on by posting `{type: "debug", show: true}` if a developer
+        needs to inspect raw worker traffic. Not exposed in the UI.
+      */
+      #debug {
+        display: none;
+        position: fixed;
+        inset: auto 8px 8px 8px;
+        max-height: 40vh;
+        overflow: auto;
+        padding: 8px 10px;
+        background: rgba(14, 11, 24, 0.92);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-family: "Geist Mono", ui-monospace, monospace;
+        font-size: 11px;
+        color: var(--text-mid);
+        white-space: pre-wrap;
+      }
+      #debug.show {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="progress" role="status" aria-live="polite">
+      <div class="label">Loading Python sandbox…</div>
+      <div class="bar"><div class="fill" id="progress-fill"></div></div>
+      <div class="pct" id="progress-pct">0%</div>
+    </div>
+    <pre id="debug"></pre>
+
+    <script>
+      // ──────────────────────────────────────────────────────────
+      // Pure relay. No policy lives in the iframe — every message
+      // is forwarded to the worker, every worker reply is forwarded
+      // to the parent. The parent (Svelte) is the trusted edge.
+      // ──────────────────────────────────────────────────────────
+      (function () {
+        "use strict";
+
+        const progressEl = document.getElementById("progress");
+        const fillEl = document.getElementById("progress-fill");
+        const pctEl = document.getElementById("progress-pct");
+        const debugEl = document.getElementById("debug");
+
+        let worker = null;
+        // Buffer host messages that arrive before the worker is up.
+        // The Svelte side may emit `init` immediately on mount; that's
+        // fine — we still spawn the worker synchronously below — but
+        // a `run` could arrive before `ready` from a fast caller.
+        const pending = [];
+        let workerReady = false;
+
+        function setProgress(p) {
+          const pct = Math.max(0, Math.min(1, Number(p) || 0));
+          fillEl.style.width = (pct * 100).toFixed(1) + "%";
+          pctEl.textContent = (pct * 100).toFixed(0) + "%";
+        }
+
+        function hideProgress() {
+          progressEl.classList.add("hidden");
+        }
+
+        function debugLog(line) {
+          // Only render when the debug overlay is on; cheap noop otherwise.
+          if (!debugEl.classList.contains("show")) return;
+          const ts = new Date().toISOString().slice(11, 23);
+          debugEl.textContent += `[${ts}] ${line}\n`;
+          debugEl.scrollTop = debugEl.scrollHeight;
+        }
+
+        function postToParent(msg) {
+          // The parent origin is the Tauri asset protocol host, which
+          // is also the iframe's origin (same 'self'). Using "*" here
+          // is safe because the only data flowing out is the worker's
+          // reply payload — no secrets — and the parent verifies the
+          // event.source === iframeEl.contentWindow.
+          parent.postMessage(msg, "*");
+        }
+
+        function spawnWorker() {
+          // Worker URL is relative to this HTML file inside src-tauri/assets/.
+          // type:"classic" so the worker can use importScripts() to pull
+          // in pyodide.js (which is itself a classic script).
+          worker = new Worker("./experiment-worker.js");
+
+          worker.onmessage = function (ev) {
+            const msg = ev.data;
+            if (!msg || typeof msg !== "object") return;
+
+            if (msg.type === "loading") {
+              setProgress(msg.progress);
+            } else if (msg.type === "ready") {
+              workerReady = true;
+              hideProgress();
+              // Drain any host messages received while we were booting.
+              while (pending.length) {
+                worker.postMessage(pending.shift());
+              }
+            }
+
+            debugLog("worker→host " + JSON.stringify(msg).slice(0, 200));
+            postToParent(msg);
+          };
+
+          worker.onerror = function (err) {
+            // Unrecoverable worker crash. Surface as a generic error
+            // with a sentinel runId so the host can flag the runner
+            // as dead and offer the user a "reload" option.
+            const message =
+              (err && (err.message || err.filename + ":" + err.lineno)) ||
+              "worker crashed";
+            debugLog("worker error: " + message);
+            postToParent({
+              type: "error",
+              runId: "__worker_crash__",
+              message: message,
+            });
+          };
+        }
+
+        window.addEventListener("message", function (ev) {
+          // Drop messages from anything other than our parent window.
+          // The sandbox already forbids same-origin tricks, but tightening
+          // here means a stray frame on the page can never speak to the
+          // worker — only the Svelte host can.
+          if (ev.source !== window.parent) return;
+
+          const msg = ev.data;
+          if (!msg || typeof msg !== "object") return;
+
+          // Internal channel: parent can flip the debug overlay
+          // without going through the worker.
+          if (msg.type === "debug") {
+            debugEl.classList.toggle("show", !!msg.show);
+            return;
+          }
+
+          debugLog("host→worker " + JSON.stringify(msg).slice(0, 200));
+
+          if (!worker) {
+            // First message — spawn the worker. The first message
+            // SHOULD be `init` per protocol but we don't enforce
+            // that in the iframe (let the worker reject unknowns).
+            spawnWorker();
+          }
+
+          if (workerReady || msg.type === "init") {
+            // `init` always goes through immediately so the worker
+            // can begin loading Pyodide. Other messages wait for
+            // `ready` to avoid racing the interpreter boot.
+            worker.postMessage(msg);
+          } else {
+            pending.push(msg);
+          }
+        });
+
+        // Tell the parent we're alive. The parent will respond with
+        // `init` to start the worker boot. (Some hosts also auto-send
+        // `init` on iframe load — both are fine; the worker handles
+        // duplicate init by ignoring after the first.)
+        postToParent({ type: "iframe_alive" });
+      })();
+    </script>
+  </body>
+</html>

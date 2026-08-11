@@ -1,0 +1,35 @@
+node_modules/
+.svelte-kit/
+build/
+dist/
+tsconfig.tsbuildinfo
+.playwright-cli/
+output/
+
+# Rust
+src-tauri/target/
+src-tauri/gen/
+
+# Python sidecar venv
+.venv/
+src-tauri/python/.venv/
+__pycache__/
+*.pyc
+
+# Local app data
+.DS_Store
+.env
+.env.local
+
+# Models (too big for git)
+assets/models/ocr/*
+assets/models/reasoning/*
+assets/models/generator/*
+!assets/models/*/.gitkeep
+
+# pdfium dylib (downloaded via scripts/install_pdfium.sh)
+assets/pdfium/libpdfium.*
+assets/pdfium/pdfium.*
+
+# Pyodide WASM bundle (downloaded via scripts/install_pyodide.sh)
+src-tauri/assets/pyodide/
