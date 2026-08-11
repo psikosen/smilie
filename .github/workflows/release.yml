@@ -92,7 +92,7 @@ jobs:
         # bundle outputs, creates / updates the GitHub release, and uploads
         # all artifacts. No macOS signing secrets configured (see top-of-file
         # comment).
-        uses: tauri-apps/tauri-action@v0.5
+        uses: tauri-apps/tauri-action@v1.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
