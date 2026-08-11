@@ -37,7 +37,10 @@
   let refineBusy = $state(false);
 
   // Track previous status so we can fire toasts on transitions.
-  let prevStatus = $state<Record<ComparisonId, ComparisonStatus>>({});
+  // This is deliberately non-reactive: the comparisons store is the
+  // dependency. Making the snapshot a rune causes the effect to trigger
+  // itself every time it replaces the object.
+  let prevStatus: Record<ComparisonId, ComparisonStatus> = {};
 
   $effect(() => {
     if (paperId) {

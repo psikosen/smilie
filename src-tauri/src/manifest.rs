@@ -48,6 +48,8 @@ pub enum RuntimeKind {
     LlamaCpp,
     #[serde(rename = "llama-server")]
     LlamaServer,
+    #[serde(rename = "ollama")]
+    Ollama,
 }
 
 impl ModelManifest {
@@ -108,6 +110,26 @@ impl ModelManifest {
             },
         );
         models.insert(
+            "reasoning_ollama".into(),
+            ModelSpec {
+                runtime: RuntimeKind::Ollama,
+                path: "qwen3.6:35b-a3b".into(),
+                mmproj: None,
+                precision: Some("q4_K_M".into()),
+                endpoint: Some("http://127.0.0.1:11434".into()),
+            },
+        );
+        models.insert(
+            "generator_ollama".into(),
+            ModelSpec {
+                runtime: RuntimeKind::Ollama,
+                path: "qwen3.6:35b-a3b".into(),
+                mmproj: None,
+                precision: Some("q4_K_M".into()),
+                endpoint: Some("http://127.0.0.1:11434".into()),
+            },
+        );
+        models.insert(
             "ocr_llama".into(),
             ModelSpec {
                 runtime: RuntimeKind::LlamaCpp,
@@ -163,8 +185,8 @@ impl ModelManifest {
             "macos".into(),
             PlatformProfile {
                 ocr: "ocr_mlx".into(),
-                reasoning: "reasoning_mlx".into(),
-                generator: "generator_mlx".into(),
+                reasoning: "reasoning_ollama".into(),
+                generator: "generator_ollama".into(),
             },
         );
         profiles.insert(

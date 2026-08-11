@@ -190,7 +190,7 @@ impl ModelRuntime for LlamaCppLocal {
     }
 }
 
-fn build_reason_prompt(paper: &PaperDocument) -> String {
+pub(super) fn build_reason_prompt(paper: &PaperDocument) -> String {
     let serialized = serde_json::to_string(paper).unwrap_or_default();
     let trimmed: String = serialized.chars().take(120_000).collect();
     format!(
@@ -198,7 +198,7 @@ fn build_reason_prompt(paper: &PaperDocument) -> String {
     )
 }
 
-fn build_generate_prompt(spec: &PageSpec) -> String {
+pub(super) fn build_generate_prompt(spec: &PageSpec) -> String {
     let serialized = serde_json::to_string(spec).unwrap_or_default();
     format!(
         r#"You are a learning-page author for the Smilie app. Output ONE JSON object matching the schema and NOTHING else. No prose. No markdown fences.
@@ -223,7 +223,7 @@ PAGE SPEC:
     )
 }
 
-fn parse_plan(raw: &str) -> Result<LearningPlan, RuntimeError> {
+pub(super) fn parse_plan(raw: &str) -> Result<LearningPlan, RuntimeError> {
     let start = raw
         .find('{')
         .ok_or_else(|| RuntimeError::Inference("model did not return JSON".into()))?;
@@ -234,7 +234,7 @@ fn parse_plan(raw: &str) -> Result<LearningPlan, RuntimeError> {
         .map_err(|e| RuntimeError::Inference(format!("parsing plan: {e}")))
 }
 
-fn build_experiment_analyze_prompt(paper: &PaperDocument) -> String {
+pub(super) fn build_experiment_analyze_prompt(paper: &PaperDocument) -> String {
     let serialized = serde_json::to_string(paper).unwrap_or_default();
     let trimmed: String = serialized.chars().take(120_000).collect();
     format!(
@@ -242,7 +242,7 @@ fn build_experiment_analyze_prompt(paper: &PaperDocument) -> String {
     )
 }
 
-fn build_experiment_generate_prompt(paper: &PaperDocument, approach: &str) -> String {
+pub(super) fn build_experiment_generate_prompt(paper: &PaperDocument, approach: &str) -> String {
     let serialized = serde_json::to_string(paper).unwrap_or_default();
     let trimmed: String = serialized.chars().take(80_000).collect();
     format!(
@@ -269,7 +269,7 @@ PAPER JSON:
     )
 }
 
-fn build_compare_prompt(paper_a: &PaperDocument, paper_b: &PaperDocument) -> String {
+pub(super) fn build_compare_prompt(paper_a: &PaperDocument, paper_b: &PaperDocument) -> String {
     let a = serde_json::to_string(paper_a).unwrap_or_default();
     let b = serde_json::to_string(paper_b).unwrap_or_default();
     let a_trim: String = a.chars().take(60_000).collect();
@@ -298,7 +298,10 @@ PAPER B:
     )
 }
 
-fn build_experiment_refine_prompt(paper: &PaperDocument, prior: &PriorAttempt) -> String {
+pub(super) fn build_experiment_refine_prompt(
+    paper: &PaperDocument,
+    prior: &PriorAttempt,
+) -> String {
     let serialized = serde_json::to_string(paper).unwrap_or_default();
     let trimmed: String = serialized.chars().take(60_000).collect();
     let user_directive = match &prior.user_refine_prompt {
@@ -323,7 +326,7 @@ PAPER JSON:
     )
 }
 
-fn parse_experiment_analysis(raw: &str) -> Result<ExperimentAnalysis, RuntimeError> {
+pub(super) fn parse_experiment_analysis(raw: &str) -> Result<ExperimentAnalysis, RuntimeError> {
     let start = raw
         .find('{')
         .ok_or_else(|| RuntimeError::Inference("analyze did not return JSON".into()))?;
@@ -334,7 +337,7 @@ fn parse_experiment_analysis(raw: &str) -> Result<ExperimentAnalysis, RuntimeErr
         .map_err(|e| RuntimeError::Inference(format!("parsing analysis: {e}")))
 }
 
-fn parse_experiment_artifacts(raw: &str) -> Result<ExperimentArtifacts, RuntimeError> {
+pub(super) fn parse_experiment_artifacts(raw: &str) -> Result<ExperimentArtifacts, RuntimeError> {
     let start = raw
         .find('{')
         .ok_or_else(|| RuntimeError::Inference("experiment gen did not return JSON".into()))?;
@@ -345,7 +348,7 @@ fn parse_experiment_artifacts(raw: &str) -> Result<ExperimentArtifacts, RuntimeE
         .map_err(|e| RuntimeError::Inference(format!("parsing artifacts: {e}")))
 }
 
-fn parse_blocks(raw: &str, fallback_title: &str) -> Result<PageBlocks, RuntimeError> {
+pub(super) fn parse_blocks(raw: &str, fallback_title: &str) -> Result<PageBlocks, RuntimeError> {
     // Same brace-slice tolerance as parse_plan; the prompt insists on
     // pure JSON so this rarely matters, but Qwen sometimes prefixes a
     // stray "Here is the page:".

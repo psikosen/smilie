@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { PaperSummary } from "$lib/ipc";
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import { cursorGlow } from "$lib/theme/effects";
   import { ipc } from "$lib/ipc";
+  import { isTauri } from "$lib/ipc/tauri-guard";
   import { papers } from "$lib/stores/papers";
   import { toast } from "$lib/stores/toast";
   import ConfirmDialog from "./ConfirmDialog.svelte";
@@ -15,6 +17,7 @@
   let deleting = $state(false);
   let askingDelete = $state(false);
   let resuming = $state(false);
+  let thumbnailFailed = $state(false);
 
   const displayTitle = $derived(
     paper.title || paper.authors[0] || "Untitled",
@@ -24,6 +27,11 @@
   const pageCountId = $derived(`paper-${paper.id}-pages`);
   const pageCountLabel = $derived(
     `${paper.page_count} ${paper.page_count === 1 ? "page" : "pages"}`,
+  );
+  const thumbnailSrc = $derived(
+    paper.thumbnail_path && isTauri()
+      ? convertFileSrc(paper.thumbnail_path, "asset")
+      : null,
   );
 
   function openDelete(e: Event) {
@@ -113,8 +121,8 @@
   ></button>
 
   <div class="thumb" aria-hidden="true">
-    {#if paper.thumbnail_path}
-      <img src={`file://${paper.thumbnail_path}`} alt="" />
+    {#if thumbnailSrc && !thumbnailFailed}
+      <img src={thumbnailSrc} alt="" onerror={() => (thumbnailFailed = true)} />
     {:else}
       <div class="thumb-placeholder">
         <svg viewBox="0 0 48 48" width="28" height="28" fill="none">

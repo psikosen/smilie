@@ -56,7 +56,7 @@
 
   function runtimeLabel(s: RuntimeStatus): string {
     switch (s.kind) {
-      case "ready": return `Ready · ${s.model}`;
+      case "ready": return `${s.runtime} · ${s.model}`;
       case "missing_weights": return `Missing: ${s.expected_path}`;
       case "error": return `Error: ${s.message}`;
     }

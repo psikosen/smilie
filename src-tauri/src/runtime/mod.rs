@@ -10,6 +10,8 @@
 
 pub mod llama_cpp_local;
 pub mod llama_cpp_server;
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+pub mod ollama;
 // mlx-vlm spawns a python sidecar — desktop only. Mobile selector
 // substitutes a stub for any model role mapped to "mlx-vlm" so the
 // build links and the UI surfaces a clear error.

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   info: vi.fn(),
+  convertFileSrc: vi.fn(),
 }));
 
 vi.mock("svelte", async () => {
@@ -27,6 +28,14 @@ vi.mock("$lib/ipc", () => ({
     getPaper: (...args: unknown[]) => mocks.getPaper(...args),
     resumeJob: (...args: unknown[]) => mocks.resumeJob(...args),
   },
+}));
+
+vi.mock("$lib/ipc/tauri-guard", () => ({
+  isTauri: () => true,
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (...args: unknown[]) => mocks.convertFileSrc(...args),
 }));
 
 vi.mock("$lib/stores/papers", () => ({
@@ -65,6 +74,10 @@ describe("PaperCard", () => {
   beforeEach(() => {
     for (const mock of Object.values(mocks)) mock.mockReset();
     mocks.refresh.mockResolvedValue(undefined);
+    mocks.convertFileSrc.mockImplementation(
+      (path: string, protocol: string) =>
+        `http://${protocol}.localhost/${encodeURIComponent(path)}`,
+    );
   });
 
   afterEach(cleanup);
@@ -89,6 +102,20 @@ describe("PaperCard", () => {
 
     await fireEvent.click(open);
     expect(onOpen).toHaveBeenCalledWith("paper-1");
+  });
+
+  it("serves thumbnails through Tauri's scoped asset protocol", () => {
+    render(PaperCard, {
+      paper: paper({ thumbnail_path: "/tmp/paper images/thumbnail.png" }),
+    });
+
+    expect(mocks.convertFileSrc).toHaveBeenCalledWith(
+      "/tmp/paper images/thumbnail.png",
+      "asset",
+    );
+    expect(document.querySelector(".thumb img")?.getAttribute("src")).toBe(
+      "http://asset.localhost/%2Ftmp%2Fpaper%20images%2Fthumbnail.png",
+    );
   });
 
   it("resumes a failed job without opening the paper", async () => {

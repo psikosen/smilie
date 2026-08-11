@@ -89,6 +89,15 @@ impl AppState {
 
         let db = Db::open(&paths.db_path).await?;
         db.run_migrations().await?;
+        match crate::pipeline::render::refresh_saved_pages(&db).await {
+            Ok(count) if count > 0 => {
+                tracing::info!(count, "upgraded saved learning pages");
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(?error, "saved page upgrade skipped");
+            }
+        }
 
         let manifest = ModelManifest::load_or_default(&paths.manifest_path)?;
         let runtime = Arc::new(RuntimeSelector::build(&manifest, &paths)?);

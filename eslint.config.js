@@ -13,9 +13,12 @@ export default [
 		// generated `.svelte-kit/`, build outputs and the Tauri target
 		// dir are handled elsewhere or shouldn't be touched at all.
 		ignores: [
+			'.venv/**',
 			'.svelte-kit/**',
+			'.playwright-cli/**',
 			'build/**',
 			'node_modules/**',
+			'output/**',
 			'src-tauri/**',
 			'scripts/**',
 			'eslint.config.js',

@@ -2,7 +2,7 @@
   "version": 1,
   "_comment": "Drop weight files into the paths below. The app reads this file at startup; edit + restart (or hit 'Reload manifest' in Settings) to re-wire runtimes without rebuilding.",
   "platform_profiles": {
-    "macos":   { "ocr": "ocr_mlx",           "reasoning": "reasoning_mlx",           "generator": "generator_mlx" },
+    "macos":   { "ocr": "ocr_mlx",           "reasoning": "reasoning_ollama",        "generator": "generator_ollama" },
     "windows": { "ocr": "ocr_llama",         "reasoning": "reasoning_llama",         "generator": "generator_llama" },
     "linux":   { "ocr": "ocr_llama",         "reasoning": "reasoning_llama",         "generator": "generator_llama" },
     "ios":     { "ocr": "ocr_llama_mobile",  "reasoning": "reasoning_llama_mobile",  "generator": "reasoning_llama_mobile" },
@@ -12,6 +12,8 @@
     "ocr_mlx":                { "runtime": "mlx-vlm",     "path": "assets/models/ocr/glm-ocr-0.9b",              "precision": "bf16" },
     "reasoning_mlx":          { "runtime": "mlx-vlm",     "path": "assets/models/reasoning/reasoning-mlx",       "precision": "bf16" },
     "generator_mlx":          { "runtime": "mlx-vlm",     "path": "assets/models/generator/generator-mlx",       "precision": "bf16" },
+    "reasoning_ollama":       { "runtime": "ollama",      "path": "qwen3.6:35b-a3b", "endpoint": "http://127.0.0.1:11434", "precision": "q4_K_M" },
+    "generator_ollama":       { "runtime": "ollama",      "path": "qwen3.6:35b-a3b", "endpoint": "http://127.0.0.1:11434", "precision": "q4_K_M" },
 
     "ocr_llama":              { "runtime": "llama.cpp",   "path": "assets/models/ocr/glm-ocr-0.9b.gguf",         "mmproj": "assets/models/ocr/mmproj.gguf" },
     "reasoning_llama":        { "runtime": "llama.cpp",   "path": "assets/models/reasoning/qwen3.6-35b.gguf" },

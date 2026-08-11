@@ -49,6 +49,7 @@ llama-cpp-2 = { version = "0.1", optional = true }
 # Kotlin shims (TODO).
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 pdfium-render = { version = "0.8", features = ["thread_safe"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Shell is only used to spawn the python sidecar on desktop; the mobile
 # build doesn't run python at all (everything routes through llama.cpp
 # bindings).

@@ -9,7 +9,12 @@
 
 use std::fmt::Write;
 
+use anyhow::Context;
+
+use crate::db::Db;
 use crate::runtime::{Block, DiagramEdge, DiagramNode, PageBlocks, QuizQuestion};
+
+const RENDERER_VERSION: &str = "4";
 
 /// Render a full HTML document for a page. The SDK is injected later by
 /// `pipeline::stages::embed_sdk` (so it stays in one place).
@@ -50,6 +55,7 @@ pub fn render_page(page_id: &str, fallback_title: &str, blocks: &PageBlocks) -> 
 <meta name="theme-color" content="#07060b">
 <meta name="referrer" content="no-referrer">
 <meta name="smilie-page-id" content="{page_id_escaped}">
+<meta name="smilie-renderer-version" content="{renderer_version}">
 <title>{title_escaped}</title>
 </head>
 <body>
@@ -59,9 +65,64 @@ pub fn render_page(page_id: &str, fallback_title: &str, blocks: &PageBlocks) -> 
 </html>
 "##,
         page_id_escaped = escape(page_id),
+        renderer_version = RENDERER_VERSION,
         title_escaped = escape(title),
         body = body
     )
+}
+
+/// Upgrade saved structured pages to the current deterministic renderer.
+/// Older free-form pages are left untouched when their source payload cannot
+/// be parsed as `PageBlocks`.
+pub async fn refresh_saved_pages(db: &Db) -> anyhow::Result<usize> {
+    let rows = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT id, title, html_path FROM pages \
+         WHERE html_path IS NOT NULL AND html_path <> ''",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+
+    let version_marker =
+        format!(r#"<meta name="smilie-renderer-version" content="{RENDERER_VERSION}">"#);
+    let mut refreshed = 0;
+    for (page_id, title, html_path) in rows {
+        let html_path = std::path::PathBuf::from(html_path);
+        let current = match std::fs::read_to_string(&html_path) {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(path = %html_path.display(), %error, "could not inspect saved page");
+                continue;
+            }
+        };
+        if current.contains(&version_marker) {
+            continue;
+        }
+
+        let Some(parent) = html_path.parent() else {
+            continue;
+        };
+        let source_path = parent.join("source.json");
+        let source = match std::fs::read_to_string(&source_path) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let Some(blocks) = parse_saved_blocks(&source) else {
+            continue;
+        };
+        let upgraded = embed_page_sdk(&render_page(&page_id, &title, &blocks));
+        std::fs::write(&html_path, upgraded)
+            .with_context(|| format!("upgrading saved page {}", html_path.display()))?;
+        refreshed += 1;
+    }
+    Ok(refreshed)
+}
+
+fn parse_saved_blocks(source: &str) -> Option<PageBlocks> {
+    serde_json::from_str(source).ok().or_else(|| {
+        let start = source.find('{')?;
+        let end = source.rfind('}')?;
+        serde_json::from_str(&source[start..=end]).ok()
+    })
 }
 
 fn render_block(block: &Block) -> String {
@@ -74,13 +135,13 @@ fn render_block(block: &Block) -> String {
             )
         }
         Block::Paragraph { text } => {
-            format!(r#"<p class="smilie-p">{}</p>"#, escape_inline(text))
+            format!(r#"<p class="smilie-p">{}</p>"#, render_prose(text))
         }
         Block::Callout { kind, title, body } => render_callout(kind, title.as_deref(), body),
         Block::KeyTerm { term, definition } => format!(
             r#"<div class="smilie-card smilie-keyterm"><div class="smilie-term">{t}</div><div class="smilie-definition">{d}</div></div>"#,
             t = escape(term),
-            d = escape_inline(definition),
+            d = render_prose(definition),
         ),
         Block::Formula { latex, caption } => render_formula(latex, caption.as_deref()),
         Block::List { items, ordered } => render_list(items, *ordered),
@@ -113,14 +174,17 @@ fn render_callout(kind: &str, title: Option<&str>, body: &str) -> String {
     };
     format!(
         r#"<aside class="smilie-callout smilie-callout-{kind_class}">{title_html}<div class="smilie-callout-body">{body_html}</div></aside>"#,
-        body_html = escape_inline(body)
+        body_html = render_prose(body)
     )
 }
 
 fn render_formula(latex: &str, caption: Option<&str>) -> String {
     let cap = match caption {
         Some(c) if !c.trim().is_empty() => {
-            format!(r#"<div class="smilie-formula-caption">{}</div>"#, escape(c))
+            format!(
+                r#"<div class="smilie-formula-caption">{}</div>"#,
+                render_prose(c)
+            )
         }
         _ => String::new(),
     };
@@ -134,7 +198,7 @@ fn render_list(items: &[String], ordered: bool) -> String {
     let tag = if ordered { "ol" } else { "ul" };
     let mut out = format!(r#"<{tag} class="smilie-list">"#);
     for item in items {
-        let _ = write!(out, r#"<li>{}</li>"#, escape_inline(item));
+        let _ = write!(out, r#"<li>{}</li>"#, render_prose(item));
     }
     let _ = write!(out, "</{tag}>");
     out
@@ -146,14 +210,25 @@ fn render_quiz(questions: &[QuizQuestion]) -> String {
     let payload = serde_json::to_string(questions).unwrap_or_else(|_| "[]".into());
     let payload_escaped = payload.replace('<', "\\u003c");
     format!(
-        r#"<section class="smilie-quiz" data-smilie-quiz='{payload}'>
+        r#"<section class="smilie-quiz">
 <noscript>Quiz requires JavaScript.</noscript>
+<script type="application/json" class="smilie-quiz-data">{payload}</script>
 <script>(function(){{
   if(!window.Smilie || !window.Smilie.quiz) return;
   var el = document.currentScript.parentElement;
-  var data = JSON.parse(el.getAttribute("data-smilie-quiz") || "[]");
-  el.removeAttribute("data-smilie-quiz");
-  window.Smilie.quiz(el, data);
+  var island = el.querySelector(".smilie-quiz-data");
+  try {{
+    var data = JSON.parse((island && island.textContent) || "[]");
+    if (island) island.remove();
+    window.Smilie.quiz(el, data);
+  }} catch (error) {{
+    if (island) island.remove();
+    console.error("Smilie quiz data could not be parsed", error);
+    var message = document.createElement("p");
+    message.className = "smilie-quiz-error";
+    message.textContent = "This quiz could not be loaded.";
+    el.appendChild(message);
+  }}
 }})();</script>
 </section>"#,
         payload = payload_escaped
@@ -182,9 +257,11 @@ fn render_code(lang: Option<&str>, code: &str) -> String {
     )
 }
 
-/// Diagram layout: lay nodes out left-to-right at fixed pitch. We control
-/// every fill/stroke so unfilled rects can never render as black voids
-/// like the model used to produce.
+/// Responsive semantic flow layout. Fixed-coordinate SVG text cannot wrap,
+/// which made realistic model labels overlap at ordinary window widths.
+/// HTML nodes keep the same visual language while allowing every label and
+/// note to wrap naturally; non-sequential relationships are preserved in a
+/// compact relation list below the primary path.
 fn render_diagram_flow(
     title: Option<&str>,
     nodes: &[DiagramNode],
@@ -193,19 +270,6 @@ fn render_diagram_flow(
     if nodes.is_empty() {
         return String::new();
     }
-
-    const NODE_W: i32 = 160;
-    const NODE_H: i32 = 64;
-    const GAP_X: i32 = 56;
-    const PAD: i32 = 24;
-    const STROKE_W: i32 = 2;
-
-    let n = nodes.len() as i32;
-    let inner_w = n * NODE_W + (n - 1).max(0) * GAP_X;
-    let svg_w = inner_w + PAD * 2;
-    let svg_h = NODE_H + PAD * 2 + 32; // extra for labels
-    let mut positions: std::collections::HashMap<&str, (i32, i32)> =
-        std::collections::HashMap::new();
 
     let mut out = String::new();
     if let Some(t) = title {
@@ -220,73 +284,83 @@ fn render_diagram_flow(
 
     let _ = write!(
         out,
-        r##"<figure class="smilie-diagram"><svg viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="flow diagram">
-<defs>
-  <marker id="smilie-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" orient="auto">
-    <path d="M0 0 L12 6 L0 12 z" fill="#9a6bff"/>
-  </marker>
-</defs>"##
+        r#"<figure class="smilie-diagram" role="group" aria-label="flow diagram"><ol class="smilie-flow" style="--smilie-flow-count:{}">"#,
+        nodes.len().min(4)
     );
 
-    // Nodes
     for (i, node) in nodes.iter().enumerate() {
-        let x = PAD + (i as i32) * (NODE_W + GAP_X);
-        let y = PAD;
-        positions.insert(node.id.as_str(), (x, y));
-
         let _ = write!(
             out,
-            r##"<g class="smilie-diagram-node">
-<rect x="{x}" y="{y}" width="{NODE_W}" height="{NODE_H}" rx="12" ry="12"
-  fill="#15101f" stroke="#9a6bff" stroke-width="{STROKE_W}"/>
-<text x="{tx}" y="{ty}" fill="#f3ecff" font-family="-apple-system,Inter,sans-serif"
-  font-size="14" font-weight="600" text-anchor="middle">{label}</text>"##,
-            tx = x + NODE_W / 2,
-            ty = y + 28,
-            label = escape(&node.label),
+            r#"<li class="smilie-flow-step"><div class="smilie-flow-node"><span class="smilie-flow-index">{:02}</span><strong>{}</strong>"#,
+            i + 1,
+            render_prose(&node.label),
         );
         if let Some(note) = &node.note {
             if !note.trim().is_empty() {
                 let _ = write!(
                     out,
-                    r##"<text x="{tx}" y="{ty}" fill="#a498c4" font-family="-apple-system,Inter,sans-serif" font-size="11" text-anchor="middle">{note}</text>"##,
-                    tx = x + NODE_W / 2,
-                    ty = y + 48,
-                    note = escape(note),
+                    r#"<span class="smilie-flow-note">{}</span>"#,
+                    render_prose(note),
                 );
             }
         }
-        let _ = write!(out, "</g>");
-    }
+        out.push_str("</div>");
 
-    // Edges
-    for edge in edges {
-        let from = positions.get(edge.from.as_str());
-        let to = positions.get(edge.to.as_str());
-        if let (Some((fx, fy)), Some((tx, ty))) = (from, to) {
-            let x1 = fx + NODE_W;
-            let y1 = fy + NODE_H / 2;
-            let x2 = *tx;
-            let y2 = ty + NODE_H / 2;
-            let _ = write!(
-                out,
-                r##"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#9a6bff" stroke-width="2" marker-end="url(#smilie-arrow)" stroke-linecap="round"/>"##
-            );
-            if let Some(label) = &edge.label {
+        if let Some(next) = nodes.get(i + 1) {
+            let edge = edges
+                .iter()
+                .find(|edge| edge.from == node.id && edge.to == next.id);
+            out.push_str(r#"<div class="smilie-flow-link">"#);
+            if let Some(label) = edge.and_then(|edge| edge.label.as_deref()) {
                 if !label.trim().is_empty() {
-                    let mx = (x1 + x2) / 2;
-                    let my = y1 - 8;
-                    let _ = write!(
-                        out,
-                        r##"<text x="{mx}" y="{my}" fill="#c8a8ff" font-family="-apple-system,Inter,sans-serif" font-size="11" text-anchor="middle">{label}</text>"##,
-                        label = escape(label),
-                    );
+                    let _ = write!(out, r#"<span>{}</span>"#, render_prose(label));
                 }
             }
+            out.push_str(r#"<b aria-hidden="true">→</b></div>"#);
         }
+        out.push_str("</li>");
+    }
+    out.push_str("</ol>");
+
+    let non_sequential: Vec<&DiagramEdge> = edges
+        .iter()
+        .filter(|edge| {
+            !nodes
+                .windows(2)
+                .any(|pair| pair[0].id == edge.from && pair[1].id == edge.to)
+        })
+        .collect();
+    if !non_sequential.is_empty() {
+        out.push_str(
+            r#"<div class="smilie-flow-relations" aria-label="Additional relationships">"#,
+        );
+        for edge in non_sequential {
+            let from = nodes
+                .iter()
+                .find(|node| node.id == edge.from)
+                .map(|node| node.label.as_str())
+                .unwrap_or(edge.from.as_str());
+            let to = nodes
+                .iter()
+                .find(|node| node.id == edge.to)
+                .map(|node| node.label.as_str())
+                .unwrap_or(edge.to.as_str());
+            let _ = write!(
+                out,
+                r#"<span><strong>{}</strong> → <strong>{}</strong>{}</span>"#,
+                render_prose(from),
+                render_prose(to),
+                edge.label
+                    .as_deref()
+                    .filter(|label| !label.trim().is_empty())
+                    .map(|label| format!(": {}", render_prose(label)))
+                    .unwrap_or_default(),
+            );
+        }
+        out.push_str("</div>");
     }
 
-    out.push_str("</svg></figure>");
+    out.push_str("</figure>");
     out
 }
 
@@ -351,6 +425,20 @@ fn escape_inline(s: &str) -> String {
     escape(s).replace('\n', "<br>")
 }
 
+/// Models occasionally leak tiny LaTeX fragments into prose fields. Keep
+/// formula blocks as real LaTeX, but normalize the common operators that
+/// should read as ordinary text in captions, notes, and paragraphs.
+fn render_prose(s: &str) -> String {
+    let normalized = s
+        .replace("^\\circ", "°")
+        .replace("\\circ", "°")
+        .replace("\\leq", "≤")
+        .replace("\\geq", "≥")
+        .replace("\\times", "×")
+        .replace("\\rightarrow", "→");
+    escape_inline(&normalized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,8 +486,8 @@ mod tests {
             }],
         };
         let html = render_page("page-x", "title", &blocks);
-        // Stroke must be set (no black voids)
-        assert!(html.contains(r##"stroke="#9a6bff""##));
+        assert!(html.contains("smilie-flow-node"));
+        assert!(html.contains("smilie-flow-link"));
         // Both labels rendered
         assert!(html.contains("Foundation"));
         assert!(html.contains("Proxy"));
@@ -433,10 +521,45 @@ mod tests {
     }
 
     #[test]
+    fn quiz_json_is_safe_for_quotes_and_script_like_content() {
+        let questions = vec![QuizQuestion {
+            q: "What's <script>alert('x')</script>?".into(),
+            choices: vec!["A's answer".into(), "\"quoted\"".into()],
+            answer: 0,
+            explanation: Some("It's safe".into()),
+        }];
+        let html = render_quiz(&questions);
+        assert!(html.contains(r#"type="application/json""#));
+        assert!(!html.contains("data-smilie-quiz="));
+        assert!(!html.contains("<script>alert"));
+        let start = html.find(r#"class="smilie-quiz-data">"#).unwrap()
+            + r#"class="smilie-quiz-data">"#.len();
+        let end = html[start..].find("</script>").unwrap() + start;
+        let parsed: Vec<QuizQuestion> = serde_json::from_str(&html[start..end]).unwrap();
+        assert_eq!(parsed[0].q, questions[0].q);
+    }
+
+    #[test]
+    fn prose_math_is_normalized_without_touching_formula_source() {
+        assert_eq!(
+            render_prose(r#"Pepper: 54.4^\circ, x \leq y"#),
+            "Pepper: 54.4°, x ≤ y"
+        );
+    }
+
+    #[test]
     fn embedded_sdk_contains_offline_math_renderer() {
         let html = embed_page_sdk("<html><head></head><body></body></html>");
         assert!(html.contains("var temml="));
         assert!(html.contains("function renderMath"));
         assert!(!html.contains("https://"));
+    }
+
+    #[test]
+    fn parses_saved_blocks_with_or_without_a_markdown_fence() {
+        let raw = r#"{"title":"Saved","blocks":[]}"#;
+        assert_eq!(parse_saved_blocks(raw).unwrap().title, "Saved");
+        let fenced = format!("```json\n{raw}\n```");
+        assert_eq!(parse_saved_blocks(&fenced).unwrap().title, "Saved");
     }
 }
